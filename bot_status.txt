@@ -1,0 +1,30 @@
+{
+  "Timestamp": "2026-02-08T00:57:34",
+  "BotPID": "40416",
+  "Process": {
+    "Id": 40416,
+    "ProcessName": "python",
+    "StartTime": "2026-02-08T00:56:56.7458821+03:00",
+    "Path": "C:\\solana dapp\\twitter-bot-python\\.venv\\Scripts\\python.exe"
+  },
+  "LastErrLines": [
+    "C:\\solana dapp\\twitter-bot-python\\ai_engine.py:8: FutureWarning: ",
+    "",
+    "All support for the `google.generativeai` package has ended. It will no longer be receiving ",
+    "updates or bug fixes. Please switch to the `google.genai` package as soon as possible.",
+    "See README for more details:",
+    "",
+    "https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md",
+    "",
+    "  import google.generativeai as genai",
+    "[2026-02-08 00:56:59] INFO HTTP Request: GET https://x.com \"HTTP/1.1 200 OK\"",
+    "[2026-02-08 00:56:59] INFO HTTP Request: GET https://abs.twimg.com/responsive-web/client-web/ondemand.s.c851ceea.js \"HTTP/1.1 200 OK\"",
+    "[2026-02-08 00:56:59] INFO HTTP Request: GET https://x.com/i/api/graphql/NimuplG1OB7Fd2btCLdBOw/UserByScreenName?variables=%7B%22screen_name%22%3A+%22IdentityPrism%22%2C+%22withSafetyModeUserFields%22%3A+false%7D&features=%7B%22hidden_profile_likes_enabled%22%3A+true%2C+%22hidden_profile_subscriptions_enabled%22%3A+true%2C+%22responsive_web_graphql_exclude_directive_enabled%22%3A+true%2C+%22verified_phone_label_enabled%22%3A+false%2C+%22subscriptions_verification_info_is_identity_verified_enabled%22%3A+true%2C+%22subscriptions_verification_info_verified_since_enabled%22%3A+true%2C+%22highlights_tweets_tab_ui_enabled%22%3A+true%2C+%22responsive_web_twitter_article_notes_tab_enabled%22%3A+false%2C+%22creator_subscriptions_tweet_preview_api_enabled%22%3A+true%2C+%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3A+false%2C+%22responsive_web_graphql_timeline_navigation_enabled%22%3A+true%7D&fieldToggles=%7B%22withAuxiliaryUserLabels%22%3A+false%7D \"HTTP/1.1 200 OK\"",
+    "[2026-02-08 00:56:59] WARNING Cookie verification via handle failed: The user does not exist.",
+    "[2026-02-08 00:56:59] INFO Sniper monitor cycle",
+    "[2026-02-08 00:56:59] INFO Trend surfer cycle",
+    "[2026-02-08 00:56:59] INFO Sleeping 233.8s (idle)"
+  ],
+  "LastOutLines": null,
+  "StateJson": "{\r\n  \"replied_tweets\": [\r\n    \"2020165896229052837\"\r\n  ],\r\n  \"last_sniper_seen\": {\r\n    \"solana\": \"2020165896229052837\",\r\n    \"solanamobile\": \"2020237379077034242\",\r\n    \"toly\": \"2020220029372088600\",\r\n    \"colosseum\": \"2020199711026925674\"\r\n  },\r\n  \"last_trend_tweet\": null,\r\n  \"bot_started_at\": 1770464430.2996895,\r\n  \"next_post_retry_at\": 1770501511.396194,\r\n  \"last_post_id\": null,\r\n  \"last_post_at\": null,\r\n  \"last_engagement_at\": 1770497911.396194,\r\n  \"state_path\": \"C:/solana dapp/twitter-bot-python/state_identityprism.json\"\r\n}"
+}

@@ -1,0 +1,17 @@
+C:\solana dapp\twitter-bot-python\ai_engine.py:8: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+[2026-02-07 18:14:40] INFO HTTP Request: GET https://x.com "HTTP/1.1 200 OK"
+[2026-02-07 18:14:40] INFO HTTP Request: GET https://abs.twimg.com/responsive-web/client-web/ondemand.s.c851ceea.js "HTTP/1.1 200 OK"
+[2026-02-07 18:14:40] INFO HTTP Request: GET https://x.com/i/api/graphql/NimuplG1OB7Fd2btCLdBOw/UserByScreenName?variables=%7B%22screen_name%22%3A+%22IdentityPrism%22%2C+%22withSafetyModeUserFields%22%3A+false%7D&features=%7B%22hidden_profile_likes_enabled%22%3A+true%2C+%22hidden_profile_subscriptions_enabled%22%3A+true%2C+%22responsive_web_graphql_exclude_directive_enabled%22%3A+true%2C+%22verified_phone_label_enabled%22%3A+false%2C+%22subscriptions_verification_info_is_identity_verified_enabled%22%3A+true%2C+%22subscriptions_verification_info_verified_since_enabled%22%3A+true%2C+%22highlights_tweets_tab_ui_enabled%22%3A+true%2C+%22responsive_web_twitter_article_notes_tab_enabled%22%3A+false%2C+%22creator_subscriptions_tweet_preview_api_enabled%22%3A+true%2C+%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3A+false%2C+%22responsive_web_graphql_timeline_navigation_enabled%22%3A+true%7D&fieldToggles=%7B%22withAuxiliaryUserLabels%22%3A+false%7D "HTTP/1.1 200 OK"
+[2026-02-07 18:14:40] WARNING Cookie verification via handle failed: The user does not exist.
+[2026-02-07 18:14:51] INFO HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict "HTTP/1.1 200 OK"
+[2026-02-07 18:14:53] INFO Attaching media: C:/solana dapp/twitter-bot-python/media_identityprism\gemini_1770477293.jpg
+[2026-02-07 18:14:58] WARNING Media upload failed (twitterapi.io): 429 Client Error: Too Many Requests for url: https://api.twitterapi.io/twitter/upload_media_v2
+[2026-02-07 18:15:00] INFO Test post sent: https://x.com/i/web/status/2020154331018719512

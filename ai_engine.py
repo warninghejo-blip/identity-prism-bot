@@ -28,8 +28,10 @@ from config import (
     MEDIA_DIR,
     MICRO_REPLIES,
     MICRO_REPLY_RATE,
+    NEWS_POST_PROMPT,
     POST_PROMPT,
     QUOTE_PROMPT,
+    REFLECTION_PROMPT,
     REPLY_BACK_PROMPT,
     SHILL_INSTRUCTION,
     SHILL_PHRASES,
@@ -40,8 +42,9 @@ from config import (
     TREND_POST_PROMPT,
     TREND_PROMPT,
     WALLET_ROAST_PROMPT,
+    WALLET_SCORE_REPLY_PROMPT,
 )
-from utils import clamp_text, trim_hashtags
+from utils import clamp_text
 
 _GEMINI_REST_URL = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
 
@@ -96,25 +99,36 @@ class AIEngine:
             return ''
         import re
         cleaned = text.strip().strip('"').strip("'")
-        cleaned = ' '.join(cleaned.split())
-        cleaned = trim_hashtags(cleaned, MAX_HASHTAGS)
-        # Extract ALL #hashtag and $TICKER tokens, place them on a new line
-        words = cleaned.split()
+        cleaned = cleaned.replace('\r\n', '\n').replace('\r', '\n')
+
+        paragraphs = [p.strip() for p in re.split(r'\n\s*\n', cleaned) if p.strip()]
         tags = []
-        body_words = []
-        for w in words:
-            if re.match(r'^[#$]\w+$', w):
-                tags.append(w)
-            else:
-                body_words.append(w)
-        body = ' '.join(body_words).rstrip().rstrip('✨⚡🔥💎🚀🌟💫⭐🔮🌙')
-        body = body.rstrip()
-        tag_str = ' '.join(tags)
+        body_paragraphs = []
+        for paragraph in paragraphs:
+            words = paragraph.split()
+            kept_words = []
+            for word in words:
+                if re.match(r'^[#$]\w+$', word):
+                    tags.append(word)
+                else:
+                    kept_words.append(word)
+            if kept_words:
+                body_paragraphs.append(' '.join(kept_words))
+
+        limited_tags = []
+        hashtag_count = 0
+        for tag in tags:
+            if tag.startswith('#'):
+                if hashtag_count >= MAX_HASHTAGS:
+                    continue
+                hashtag_count += 1
+            limited_tags.append(tag)
+
+        body = '\n\n'.join(body_paragraphs).rstrip().rstrip('✨⚡🔥💎🚀🌟💫⭐🔮🌙').rstrip()
+        tag_str = ' '.join(limited_tags)
         if tag_str:
-            cleaned = f'{body}\n{tag_str}'
-        else:
-            cleaned = body
-        return cleaned
+            return f'{body}\n{tag_str}' if body else tag_str
+        return body
 
     def _ensure_hashtags(self, text):
         """Append hashtags and $SOL if the AI didn't include them."""
@@ -367,6 +381,68 @@ class AIEngine:
             return path
         return path
 
+    def _select_cached_image(self):
+        if not os.path.isdir(MEDIA_DIR):
+            return None
+        candidates = [
+            os.path.join(MEDIA_DIR, name)
+            for name in os.listdir(MEDIA_DIR)
+            if name.startswith('gemini_') and name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda path: os.path.getmtime(path), reverse=True)
+        return candidates[0]
+
+    def generate_news_post(self, headline, source, summary='', include_shill=False):
+        """Generate a tweet reacting to a news headline."""
+        shill = ''
+        if include_shill:
+            phrase = random.choice(SHILL_PHRASES)
+            shill = SHILL_INSTRUCTION.format(phrase=phrase)
+        prompt = NEWS_POST_PROMPT.format(
+            headline=headline[:200], source=source,
+            summary=(summary or 'N/A')[:300],
+            hashtags=self._random_hashtags(), shill=shill,
+        )
+        return self._ensure_hashtags(self._generate(prompt))
+
+    def generate_reflection(self, posts_summary, today_stats):
+        """Generate daily reflection on bot performance."""
+        prompt = REFLECTION_PROMPT.format(
+            posts_summary=posts_summary, today_stats=today_stats,
+        )
+        raw = self._generate(prompt)
+        if not raw:
+            return None, None
+        analysis, strategy = '', ''
+        for line in raw.split('\n'):
+            line = line.strip()
+            if line.upper().startswith('ANALYSIS:'):
+                analysis = line.split(':', 1)[1].strip()
+            elif line.upper().startswith('STRATEGY:'):
+                strategy = line.split(':', 1)[1].strip()
+        return analysis or raw, strategy
+
+    def generate_wallet_score_reply(self, address, score, tier, badges, stats):
+        """Generate a personalized reply based on wallet score data."""
+        short_addr = f'{address[:4]}...{address[-4:]}'
+        badge_str = ', '.join(badges) if badges else 'none yet'
+        stats_line = (
+            f'SOL: {stats.get("solBalance", 0)} | '
+            f'Txns: {stats.get("txCount", 0)} | '
+            f'NFTs: {stats.get("nftCount", 0)} | '
+            f'Age: {stats.get("walletAgeDays", 0)}d'
+        )
+        prompt = WALLET_SCORE_REPLY_PROMPT.format(
+            short_addr=short_addr, score=score, tier=tier.replace('_', ' ').title(),
+            badges=badge_str, stats_line=stats_line,
+        )
+        reply = self._generate(prompt)
+        if not reply:
+            return None
+        return reply
+
     def generate_post_image(self, post_text=None):
         if not GEMINI_IMAGE_MODEL:
             logging.warning('Missing GEMINI_IMAGE_MODEL; skipping image generation.')
@@ -375,17 +451,51 @@ class AIEngine:
         if post_text:
             trimmed = post_text[:120].strip()
             prompt = f'{prompt} Inspired by: {trimmed}'
-        try:
-            response = self._client.models.generate_images(
-                model=GEMINI_IMAGE_MODEL,
-                prompt=prompt,
-            )
-        except Exception as exc:
-            logging.warning('Gemini image generation failed: %s', exc)
+        
+        response = None
+        # Robust retry loop for 503s
+        max_retries = 6
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self._client.models.generate_images(
+                    model=GEMINI_IMAGE_MODEL,
+                    prompt=prompt,
+                )
+                # Google GenAI library might return a response object even on partial failure,
+                # but usually raises exceptions for 500s.
+                if response:
+                    break
+            except Exception as exc:
+                error_str = str(exc)
+                is_503 = '503' in error_str or 'Service Unavailable' in error_str or 'ResourceExhausted' in error_str
+                
+                # Longer backoff for server errors
+                if is_503:
+                    delay = 10 * attempt + random.uniform(1, 5) # 10s, 20s, 30s...
+                else:
+                    delay = 5 * attempt # 5s, 10s...
+                
+                logging.warning(f'Gemini image generation failed (attempt {attempt}/{max_retries}): {exc}. Waiting {delay:.1f}s...')
+                
+                if attempt < max_retries:
+                    time.sleep(delay)
+                else:
+                    logging.error(f'Gemini image generation gave up after {max_retries} attempts.')
+
+        if response is None:
+            cached = self._select_cached_image()
+            if cached:
+                logging.warning('Gemini image unavailable after retries; using cached image: %s', cached)
+                return cached
             return None
+            
         image_bytes = self._extract_image_bytes(response)
         if not image_bytes:
-            logging.warning('Gemini image generation returned no data.')
+            logging.warning('Gemini image generation returned no data (empty bytes).')
+            cached = self._select_cached_image()
+            if cached:
+                logging.warning('Gemini image returned no data; using cached image: %s', cached)
+                return cached
             return None
         os.makedirs(MEDIA_DIR, exist_ok=True)
         filename = f'gemini_{int(time.time())}.png'

@@ -1,9 +1,0 @@
-{
-  "replied_tweets": [],
-  "last_sniper_seen": {},
-  "last_trend_tweet": null,
-  "state_path": "C:\\solana dapp\\twitter-bot-python\\state.json",
-  "next_post_retry_at": 0,
-  "last_action_at": 0,
-  "action_index": 0
-}

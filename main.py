@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import datetime
 import logging
+import os
 import random
 import re
 import time
@@ -17,6 +18,7 @@ from config import (
     BLINK_SHARE_URL,
     BOT_USERNAME,
     CTA_DOMAIN,
+    ENGAGEMENT_COOLDOWN_SECONDS,
     LIKE_RATE,
     LINK_INJECT_RATE,
     MAX_STORED_TWEETS,
@@ -31,18 +33,58 @@ from config import (
     TARGET_USERS,
     TREND_QUERIES,
     WALLET_CHECK_KEYWORDS,
+    GEMINI_PROXY,
 )
+from memory import AgentMemory
+from news_fetcher import NewsFetcher
 from twitter_client import TwitterClient
-from utils import async_sleep_random, load_state, save_state, setup_logging
+from utils import async_sleep_random, load_state, save_state, setup_logging, check_single_instance
 
 REPUTATION_API_URL = f'https://{CTA_DOMAIN}/api/reputation'
 _SOLANA_ADDR_RE = re.compile(r'\b[1-9A-HJ-NP-Za-km-z]{32,44}\b')
+MAX_TWEET_AGE_HOURS = 24
 
 TIER_EMOJI = {
     'mercury': '☿️', 'mars': '🔴', 'venus': '🌋', 'earth': '🌍',
     'neptune': '🔵', 'uranus': '💎', 'saturn': '🪐', 'jupiter': '🟠',
     'sun': '☀️', 'binary_sun': '🌟🌟',
 }
+
+# ── Agent globals (initialized in main()) ──
+_memory = None
+_news = None
+
+
+def _is_tweet_too_old(tweet, max_hours=MAX_TWEET_AGE_HOURS):
+    """Return True if tweet is older than max_hours. Skips if date unavailable."""
+    created = getattr(tweet, 'created_at', None)
+    if not created:
+        return False
+    try:
+        if isinstance(created, str):
+            dt = datetime.datetime.strptime(created, '%a %b %d %H:%M:%S %z %Y')
+        elif isinstance(created, datetime.datetime):
+            dt = created
+        else:
+            return False
+        age = datetime.datetime.now(datetime.timezone.utc) - dt
+        return age.total_seconds() > max_hours * 3600
+    except (ValueError, TypeError):
+        return False
+
+
+def _already_replied(tweet_id, state):
+    """Double-check: state.json + SQLite memory. Prevents all duplicates."""
+    if not tweet_id:
+        return True
+    tid = str(tweet_id)
+    if tid in state.get('replied_tweets', []):
+        return True
+    if tid in state.get('replied_mentions', []):
+        return True
+    if _memory and _memory.has_interaction_with_tweet(tid):
+        return True
+    return False
 
 
 def _extract_solana_addresses(text):
@@ -127,18 +169,33 @@ def today_str():
     return datetime.date.today().isoformat()
 
 
+COMMENT_COOLDOWN_HOURS = 6  # allow re-commenting after 6 hours
+
 def is_commented_today(state, handle):
-    return state.get('commented_today', {}).get(handle) == today_str()
+    ts_val = state.get('commented_today', {}).get(handle)
+    if not ts_val:
+        return False
+    if isinstance(ts_val, (int, float)):
+        return (time.time() - ts_val) < COMMENT_COOLDOWN_HOURS * 3600
+    return ts_val == today_str()
 
 
 def mark_commented_today(state, handle):
-    state.setdefault('commented_today', {})[handle] = today_str()
+    state.setdefault('commented_today', {})[handle] = time.time()
 
 
 def cleanup_old_comments(state):
-    today = today_str()
+    now = time.time()
     old = state.get('commented_today', {})
-    state['commented_today'] = {h: d for h, d in old.items() if d == today}
+    cutoff = COMMENT_COOLDOWN_HOURS * 3600
+    cleaned = {}
+    for h, d in old.items():
+        if isinstance(d, (int, float)):
+            if (now - d) < cutoff:
+                cleaned[h] = d
+        elif d == today_str():
+            cleaned[h] = d
+    state['commented_today'] = cleaned
 
 
 def get_next_account(state):
@@ -167,6 +224,8 @@ async def do_post(client, ai_engine, state):
     if tweet_id:
         state['last_post_id'] = tweet_id
         state['last_post_at'] = time.time()
+        if _memory:
+            _memory.record_post(tweet_id, 'post', post_text)
         save_state(state, state['state_path'])
         logging.info('Posted: https://x.com/i/web/status/%s', tweet_id)
         return True
@@ -209,7 +268,10 @@ async def do_engage(client, ai_engine, state):
     # Pick next uncommented account
     handle = get_next_account(state)
     if not handle:
-        logging.info('All %d accounts commented today; trying mention reply', len(TARGET_USERS))
+        logging.info('All %d accounts on cooldown; trying search engage', len(TARGET_USERS))
+        search_result = await _try_search_engage(client, ai_engine, state)
+        if search_result in ('commented', 'replied'):
+            return search_result
         return await _try_mention_reply(client, ai_engine, state)
 
     logging.info('Checking @%s for new posts', handle)
@@ -227,15 +289,37 @@ async def do_engage(client, ai_engine, state):
     if tweets:
         for tweet in tweets[:3]:
             tid = client._extract_tweet_id(tweet)
-            if not tid or tid in state['replied_tweets']:
+            if not tid or _already_replied(tid, state):
                 continue
             if client.is_retweet(tweet):
+                continue
+            if _is_tweet_too_old(tweet):
+                logging.info('Skipping old tweet %s from @%s (>%dh)', tid, handle, MAX_TWEET_AGE_HOURS)
                 continue
             text = client.get_tweet_text(tweet)
             if not text:
                 continue
             await maybe_like(client, tweet)
             await asyncio.sleep(random.uniform(2, 6))
+            # Auto wallet scoring: if tweet contains a Solana address, score it
+            addresses = _extract_solana_addresses(text)
+            if addresses and _memory:
+                addr = addresses[0]
+                logging.info('Wallet detected in @%s tweet: %s', handle, addr[:8])
+                rep = await asyncio.to_thread(_fetch_reputation, addr)
+                if rep and 'score' in rep:
+                    _memory.record_wallet_score(
+                        addr, rep['score'], rep.get('tier', ''),
+                        rep.get('badges', []),
+                    )
+                    reply_text = ai_engine.generate_wallet_score_reply(
+                        addr, rep['score'], rep.get('tier', 'mercury'),
+                        rep.get('badges', []), rep.get('stats', {}),
+                    )
+                    if reply_text:
+                        target_tweet_id = tid
+                        target_text = reply_text
+                        break
             if ai_engine.should_micro_reply():
                 reply_text = ai_engine.generate_micro_reply()
             else:
@@ -263,6 +347,8 @@ async def do_engage(client, ai_engine, state):
             remember_reply(state, target_tweet_id)
             mark_commented_today(state, handle)
             state['last_engagement_at'] = now
+            if _memory:
+                _memory.record_interaction(handle, target_tweet_id, reply_id, 'comment', target_text)
             save_state(state, state['state_path'])
             logging.info('Comment on @%s posted: %s', handle, reply_id)
             return 'commented'
@@ -271,6 +357,49 @@ async def do_engage(client, ai_engine, state):
 
     logging.info('No fresh post from @%s; trying mention reply', handle)
     return await _try_mention_reply(client, ai_engine, state)
+
+
+async def _try_search_engage(client, ai_engine, state):
+    """Fallback engage: find popular tweets via search and comment."""
+    query = random.choice(SEARCH_QUERIES)
+    try:
+        tweets = await client.search_tweets(query, count=10)
+    except Exception as exc:
+        logging.warning('Search engage failed: %s', exc)
+        return 'skipped'
+    if not tweets:
+        return 'skipped'
+    for tweet in tweets:
+        tid = client._extract_tweet_id(tweet)
+        if not tid or _already_replied(tid, state):
+            continue
+        text = client.get_tweet_text(tweet)
+        user = getattr(tweet, 'user_screen_name', '') or 'anon'
+        if not text or len(text) < 30:
+            continue
+        likes = client.get_like_count(tweet)
+        if likes < 10:
+            continue
+        if client.is_retweet(tweet):
+            continue
+        await maybe_like(client, tweet)
+        await asyncio.sleep(random.uniform(2, 6))
+        reply_text = ai_engine.generate_sniper_reply(text, user, include_shill=should_shill())
+        if not reply_text:
+            continue
+        logging.info('Search engage: commenting on @%s tweet %s', user, tid)
+        status, reply_id = await client.try_reply(tid, reply_text)
+        if status == '429':
+            return '429'
+        if status == 'ok' and reply_id:
+            remember_reply(state, tid)
+            state['last_engagement_at'] = time.time()
+            if _memory:
+                _memory.record_interaction(user, tid, reply_id, 'search_comment', reply_text)
+            save_state(state, state['state_path'])
+            logging.info('Search engage comment on @%s: %s', user, reply_id)
+            return 'commented'
+    return 'skipped'
 
 
 async def _try_mention_reply(client, ai_engine, state):
@@ -286,10 +415,12 @@ async def _try_mention_reply(client, ai_engine, state):
     our_name = (BOT_USERNAME or '').lower().replace('@', '')
     for mention in mentions:
         mention_id = client._extract_tweet_id(mention)
-        if not mention_id or mention_id in replied_mentions:
+        if not mention_id or _already_replied(mention_id, state):
             continue
         author = getattr(mention, 'user_screen_name', '') or ''
         if author.lower() == our_name:
+            continue
+        if _is_tweet_too_old(mention):
             continue
         mention_text = client.get_tweet_text(mention)
         if not mention_text:
@@ -359,13 +490,15 @@ def _maybe_inject_link(post_text, state):
 
 # ── Main loop ──
 
-SLOT_INTERVAL_MIN = 7200    # 2 hours between actions
-SLOT_INTERVAL_MAX = 9000    # up to 2.5 hours
-SLEEP_CHECK = 120           # poll every 2 min (for faster mention detection)
-POST_COOLDOWN_MIN = 14400   # minimum 4 hours between posts
-POST_COOLDOWN_MAX = 18000   # up to 5 hours
-MAX_POSTS_PER_DAY = 6       # total write actions (posts + threads + trends + quotes)
-MAX_ENGAGEMENTS_PER_DAY = 6 # ~1 engage between each post
+SLOT_INTERVAL_MIN = 1800    # 30 min between actions
+SLOT_INTERVAL_MAX = 3600    # up to 60 min
+SLEEP_CHECK = 90            # poll every 1.5 min
+POST_COOLDOWN_MIN = 14400   # minimum 4h between posts
+POST_COOLDOWN_MAX = 18000   # up to 5h between posts
+MAX_POSTS_PER_DAY = 5       # total write actions (posts + threads + trends + quotes)
+MAX_ENGAGEMENTS_PER_DAY = 12  # comments/replies per day (~1 per 2h over 12h active window)
+SKIPPED_RETRY_MIN = 600     # if engage skipped, retry in 10 min
+SKIPPED_RETRY_MAX = 900     # ... up to 15 min
 
 
 def _pick_action(state):
@@ -412,6 +545,8 @@ async def do_thread(client, ai_engine, state):
         state['last_post_id'] = results[0][0]
         state['daily_threads'] = state.get('daily_threads', 0) + 1
         _track_action(state, 'thread')
+        if _memory:
+            _memory.record_post(results[0][0], 'thread', tweets[0] if tweets else '', topic=tweets[0][:80] if tweets else None)
         save_state(state, state['state_path'])
         logging.info('Thread posted: %s', results[0][0])
         return True
@@ -454,6 +589,8 @@ async def do_trend_post(client, ai_engine, state):
             state['last_post_at'] = time.time()
             state['last_post_id'] = tweet_id
             _track_action(state, 'trend_post')
+            if _memory:
+                _memory.record_post(tweet_id, 'trend_post', post_text)
             save_state(state, state['state_path'])
             logging.info('Trend post: %s (inspired by %s)', tweet_id, tid)
             return True
@@ -500,12 +637,81 @@ async def do_quote(client, ai_engine, state):
             state['last_post_at'] = time.time()
             state['daily_quotes'] = state.get('daily_quotes', 0) + 1
             _track_action(state, 'quote')
+            if _memory:
+                _memory.record_post(qt_id, 'quote', quote_text)
             save_state(state, state['state_path'])
             logging.info('Quote tweet: %s (quoted %s)', qt_id, tid)
             return True
         logging.warning('Quote tweet failed: %s', err)
         return False
     return False
+
+
+# ── News post action ──
+
+async def do_news_post(client, ai_engine, state):
+    """Post about a fresh news article, connecting it to Identity Prism."""
+    if not _news:
+        logging.info('News fetcher not available; falling back to regular post')
+        return await do_post(client, ai_engine, state)
+    _news.fetch_all()
+    news_items = _news.get_fresh_news(limit=5)
+    if not news_items:
+        logging.info('No fresh news available; falling back to regular post')
+        return await do_post(client, ai_engine, state)
+    news = random.choice(news_items)
+    post_text = ai_engine.generate_news_post(
+        news['title'], news['source'], news.get('summary', ''),
+        include_shill=should_shill(),
+    )
+    if not post_text:
+        logging.warning('Failed to generate news post')
+        return False
+    post_text = _maybe_inject_link(post_text, state)
+    logging.info('News post [%d chars] re: "%s": %s',
+                 len(post_text), news['title'][:60], post_text)
+    media_paths = await build_media_paths(ai_engine, post_text)
+    tweet_id, error_message = await client.post_tweet(post_text, media_paths=media_paths)
+    if tweet_id:
+        state['last_post_id'] = tweet_id
+        state['last_post_at'] = time.time()
+        if _memory:
+            _memory.record_post(tweet_id, 'news_post', post_text, topic=news['title'][:100])
+            _memory.mark_news_used(news['link'])
+        save_state(state, state['state_path'])
+        logging.info('News post published: https://x.com/i/web/status/%s', tweet_id)
+        return True
+    logging.warning('News post failed: %s', error_message)
+    return False
+
+
+# ── Daily reflection ──
+
+async def do_reflection(ai_engine, state):
+    """Run daily morning reflection on bot performance."""
+    if not _memory:
+        return None
+    today = today_str()
+    existing = _memory.get_today_reflection(today)
+    if existing:
+        return existing
+    recent = _memory.get_recent_posts(days=1, limit=10)
+    if not recent:
+        logging.info('No recent posts for reflection')
+        return None
+    posts_summary = '\n'.join(
+        f'- [{p["action_type"]}] {(p["content"] or "")[:100]}'
+        for p in recent
+    )
+    stats = state.get('action_stats', {}).get(today, {})
+    today_stats = ', '.join(f'{k}: {v}' for k, v in stats.items()) or 'no stats yet'
+    analysis, strategy = ai_engine.generate_reflection(posts_summary, today_stats)
+    if analysis:
+        _memory.save_reflection(today, analysis, strategy or '')
+        logging.info('Reflection: ANALYSIS=%s | STRATEGY=%s',
+                     analysis[:100], (strategy or '')[:100])
+        return {'analysis': analysis, 'strategy': strategy}
+    return None
 
 
 # ── Engagement tracking ──
@@ -522,6 +728,9 @@ def _track_action(state, action_type):
 
 
 async def main():
+    if not check_single_instance('twitter_bot.lock'):
+        return
+
     load_dotenv()
     setup_logging()
 
@@ -563,6 +772,14 @@ async def main():
 
     ai_engine = AIEngine()
 
+    # ── Initialize agent memory & news fetcher ──
+    global _memory, _news
+    _memory_db = os.path.join(os.path.dirname(STATE_PATH), 'agent_memory.db')
+    _memory = AgentMemory(_memory_db)
+    _news = NewsFetcher(_memory, proxy=GEMINI_PROXY or None)
+    logging.info('Agent memory: %s | Wallets scored: %d',
+                 _memory_db, _memory.get_total_wallets_scored())
+
     if args.post_once:
         post_text = ai_engine.generate_post_text(include_shill=True)
         if not post_text:
@@ -580,6 +797,7 @@ async def main():
             state['daily_threads'] = 0
             state['daily_quotes'] = 0
             state['daily_reset_date'] = today_str()
+            state['_reflection_done'] = False
             logging.info('Daily counters reset')
 
     last_action_at = state.get('last_slot_at', 0)
@@ -603,6 +821,16 @@ async def main():
             cleanup_old_comments(state)
             reset_daily_counters_if_needed()
 
+            # ── Morning reflection (once per day) ──
+            if not state.get('_reflection_done'):
+                try:
+                    await do_reflection(ai_engine, state)
+                    _memory.cleanup_old(days=30)
+                    state['_reflection_done'] = True
+                except Exception as exc:
+                    logging.warning('Morning reflection failed: %s', exc)
+                    state['_reflection_done'] = True  # don't retry endlessly
+
             # ── Priority: check mentions for wallet requests every 30 min ──
             since_last_mention_poll = now - state.get('last_mention_poll_at', 0)
             if since_last_mention_poll >= MENTION_POLL_INTERVAL:
@@ -614,10 +842,10 @@ async def main():
                     save_state(state, state['state_path'])
                     # Don't count this as a main action slot
 
-            # ── Main action timer (2-2.5h between actions) ──
+            # ── Main action timer ──
             slot_interval = random.uniform(SLOT_INTERVAL_MIN, SLOT_INTERVAL_MAX)
             if not _is_active_hour():
-                slot_interval *= 1.5
+                slot_interval *= 1.2
 
             wait_left = slot_interval - (now - last_action_at)
             if wait_left > 0:
@@ -636,7 +864,7 @@ async def main():
             last_post = state.get('last_post_at') or 0
             post_cooldown = random.uniform(POST_COOLDOWN_MIN, POST_COOLDOWN_MAX)
             since_last_post = time.time() - last_post
-            can_post = since_last_post >= post_cooldown and total_writes < MAX_POSTS_PER_DAY
+            can_post = since_last_post >= post_cooldown and total_writes < MAX_POSTS_PER_DAY and _is_active_hour()
 
             # Alternation logic: last was engage -> try post; last was post -> engage
             if last_type == 'engage' and can_post:
@@ -654,10 +882,17 @@ async def main():
                 # Can't post yet -> engage
                 action = 'engage'
 
+            action_productive = False
+
             if action == 'engage':
+                since_last_engage = time.time() - state.get('last_engagement_at', 0)
+                engage_cooldown_remaining = ENGAGEMENT_COOLDOWN_SECONDS - since_last_engage
                 if state.get('skip_next_engage'):
                     logging.info('=== ENGAGE skipped (previous 429) ===')
                     state['skip_next_engage'] = False
+                elif engage_cooldown_remaining > 0:
+                    logging.info('=== ENGAGE skipped (cooldown %.0f min remaining) ===',
+                                 engage_cooldown_remaining / 60)
                 elif state.get('daily_engagements', 0) >= MAX_ENGAGEMENTS_PER_DAY:
                     logging.info('=== ENGAGE skipped (daily cap %d/%d) ===',
                                  state['daily_engagements'], MAX_ENGAGEMENTS_PER_DAY)
@@ -669,6 +904,7 @@ async def main():
                         state['daily_engagements'] = state.get('daily_engagements', 0) + 1
                         _track_action(state, 'engage')
                         state['last_action_type'] = 'engage'
+                        action_productive = True
                     if result == '429':
                         state['skip_next_engage'] = True
 
@@ -683,6 +919,7 @@ async def main():
                 if ok:
                     state['daily_posts'] = total_writes + 1
                     state['last_action_type'] = 'thread'
+                    action_productive = True
 
             elif action == 'trend_post':
                 logging.info('=== TREND POST ===')
@@ -691,6 +928,7 @@ async def main():
                 if ok:
                     state['daily_posts'] = total_writes + 1
                     state['last_action_type'] = 'trend_post'
+                    action_productive = True
 
             elif action == 'quote':
                 logging.info('=== QUOTE ===')
@@ -699,6 +937,17 @@ async def main():
                 if ok:
                     state['daily_posts'] = total_writes + 1
                     state['last_action_type'] = 'quote'
+                    action_productive = True
+
+            elif action == 'news_post':
+                logging.info('=== NEWS POST ===')
+                ok = await do_news_post(client, ai_engine, state)
+                logging.info('News post result: %s', 'OK' if ok else 'FAIL')
+                if ok:
+                    state['daily_posts'] = total_writes + 1
+                    state['last_action_type'] = 'news_post'
+                    _track_action(state, 'news_post')
+                    action_productive = True
 
             else:  # 'post'
                 logging.info('=== POST ===')
@@ -708,11 +957,20 @@ async def main():
                     state['daily_posts'] = total_writes + 1
                     state['last_action_type'] = 'post'
                     _track_action(state, 'post')
+                    action_productive = True
 
         except Exception as exc:
-            logging.warning('Cycle error: %s', exc)
+            logging.error('Cycle error: %s', exc, exc_info=True)
+            action_productive = False
+            await asyncio.sleep(30)  # brief pause after errors
 
-        last_action_at = time.time()
+        if action_productive:
+            last_action_at = time.time()
+        else:
+            # Failed/skipped action: retry much sooner instead of wasting a full slot
+            retry_in = random.uniform(SKIPPED_RETRY_MIN, SKIPPED_RETRY_MAX)
+            last_action_at = time.time() - (random.uniform(SLOT_INTERVAL_MIN, SLOT_INTERVAL_MAX) - retry_in)
+            logging.info('Action unproductive; retrying in ~%.0f min', retry_in / 60)
         state['last_slot_at'] = last_action_at
         save_state(state, state['state_path'])
 
@@ -720,14 +978,10 @@ async def main():
 
 
 if __name__ == '__main__':
-    _backoff = 5
-    while True:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            break
-        except Exception as exc:
-            logging.error('FATAL: %s', exc, exc_info=True)
-        logging.warning('Bot exited — restarting in %ds', _backoff)
-        time.sleep(_backoff)
-        _backoff = min(_backoff * 2, 300)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info('Bot stopped by user')
+    except Exception as exc:
+        logging.error('FATAL: %s', exc, exc_info=True)
+        sys.exit(1)

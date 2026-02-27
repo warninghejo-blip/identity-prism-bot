@@ -23,15 +23,26 @@ def _split_list(value: str) -> list:
     return [item.strip() for item in normalized.split(',') if item.strip()]
 
 TARGET_USERS = [
-    'solana', 'solanamobile', 'toly', 'colosseum',
-    'JupiterExchange', 'tensor_hq', 'MagicEden',
-    'phantom', 'DriftProtocol', 'aborose_sol',
+    # Core Solana ecosystem
+    'solana', 'toly', 'aeyakovenko', 'rajgokal',
+    # Infra & tooling
+    'solanamobile', 'MagicBlock_', 'heliuslabs',
+    # DEXes & DeFi
+    'JupiterExchange', 'DriftProtocol', 'MarginFi',
+    # NFT / Consumer
+    'tensor_hq', 'MagicEden',
+    # Hackathons & grants
+    'colosseum', 'superteamDAO',
+    # Identity / social adjacent
+    'TapestryProto', 'phantom',
+    # Additional active accounts
+    'sendarcade', 'RaydiumProtocol',
 ]
 
 SNIPER_INTERVAL_RANGE = (25 * 60, 40 * 60)
 TREND_INTERVAL_RANGE = (25 * 60, 40 * 60)
 LOOP_SLEEP_RANGE = (3 * 60, 8 * 60)
-MENTION_POLL_INTERVAL = int(os.getenv('MENTION_POLL_INTERVAL', str(30 * 60)))  # check mentions every 30 min
+MENTION_POLL_INTERVAL = int(os.getenv('MENTION_POLL_INTERVAL', str(15 * 60)))  # check mentions every 15 min
 
 WARMUP_HOURS = int(os.getenv('WARMUP_HOURS', '0'))
 WARMUP_ACTION_RATE = float(os.getenv('WARMUP_ACTION_RATE', '1.0'))
@@ -41,22 +52,23 @@ WARMUP_EXTRA_DELAY_RANGE = (
 )
 
 SEARCH_QUERIES = [
-    '$SOL -filter:retweets',
-    'solana NFT -filter:retweets',
-    'solana defi -filter:retweets',
-    'solana mobile -filter:retweets',
-    'solana airdrop -filter:retweets',
-    '#Solana -filter:retweets',
+    '$SOL -filter:retweets min_faves:80',
+    'solana NFT -filter:retweets min_faves:50',
+    'solana defi -filter:retweets min_faves:50',
+    'solana mobile dapp -filter:retweets min_faves:30',
+    'solana airdrop -filter:retweets min_faves:80',
+    '#Solana -filter:retweets min_faves:100',
 ]
 
 TREND_QUERIES = [
-    'solana ecosystem -filter:retweets min_faves:50',
-    'solana AI agent -filter:retweets',
-    'web3 identity -filter:retweets',
-    'on-chain reputation -filter:retweets',
-    'solana hackathon -filter:retweets',
-    'DePIN solana -filter:retweets',
-    'solana gaming -filter:retweets',
+    'solana ecosystem -filter:retweets min_faves:200',
+    'solana AI agent -filter:retweets min_faves:100',
+    'web3 identity -filter:retweets min_faves:50',
+    'on-chain reputation -filter:retweets min_faves:30',
+    'solana hackathon -filter:retweets min_faves:50',
+    'DePIN solana -filter:retweets min_faves:100',
+    'solana gaming -filter:retweets min_faves:100',
+    'crypto identity sybil -filter:retweets min_faves:30',
 ]
 
 HASHTAG_SETS = [
@@ -70,26 +82,32 @@ HASHTAG_SETS = [
 ]
 
 ACTION_WEIGHTS = {
-    'post': 30,
-    'thread': 15,
-    'trend_post': 25,
-    'quote': 15,
-    'engage': 15,
+    'post': 6,
+    'thread': 4,
+    'trend_post': 6,
+    'quote': 18,
+    'news_post': 10,
+    'engage': 56,
 }
 
 SHILL_RATE = 0.4
 LIKE_RATE = 0.6
 RETWEET_RATE = 0.08
-MICRO_REPLY_RATE = 0.2
+MICRO_REPLY_RATE = 0.07
 MICRO_REPLIES = [
-    'based', 'this \U0001f525', 'real ones know', 'big if true',
-    'lfg', 'wagmi', 'ngl this is fire', 'facts',
-    'the vibes are immaculate', 'bullish on this',
+    'on-chain data never lies',
+    'wallet history is the new resume',
+    'your transactions tell the whole story',
+    'the chain remembers everything',
+    'this is why on-chain identity matters',
+    'reputation is built one tx at a time',
+    'degens with history > degens with none',
+    'exactly — the data is all there on-chain',
 ]
 SHILL_PHRASES = [
-    'been checking my on-chain soul lately',
-    'Identity Prism vibes are strong today',
-    'my on-chain soul looks wild in Identity Prism',
+    'built something that scores wallets from 40+ on-chain signals',
+    'been digging into what on-chain history actually reveals about a wallet',
+    'turns out your transaction history says more about you than any KYC form',
 ]
 
 MAX_HASHTAGS = 2
@@ -107,11 +125,11 @@ ATTEST_URL = os.getenv('ATTEST_URL', f'https://dial.to/?action=solana-action:htt
 MINT_BLINK_URL = os.getenv('MINT_BLINK_URL', f'https://dial.to/?action=solana-action:https://{CTA_DOMAIN}/api/actions/mint-blink').strip()
 LINK_INJECT_RATE = float(os.getenv('LINK_INJECT_RATE', '0.35'))  # 35% chance to add a link to a post
 SOFT_CTAS = [
-    'peep my profile if you wanna see your on-chain stats',
-    'link in my bio if you want to check your wallet score',
-    'curious about your on-chain identity? check my profile',
-    'wanna see what your wallet says about you? profile link',
-    'your on-chain soul is waiting — link in bio',
+    'built a tool for this — identityprism.xyz',
+    'you can check any wallet at identityprism.xyz',
+    'we score this at identityprism.xyz if you\'re curious',
+    'that\'s exactly what identityprism.xyz measures',
+    'this is what the data shows at identityprism.xyz',
 ]
 MEDIA_UPLOAD_RETRIES = int(os.getenv('MEDIA_UPLOAD_RETRIES', '2'))
 MEDIA_UPLOAD_RETRY_DELAY = int(os.getenv('MEDIA_UPLOAD_RETRY_DELAY', '15'))
@@ -136,18 +154,36 @@ GEMINI_IMAGE_PROMPT = os.getenv(
 ).strip()
 
 IMAGE_PROMPT_VARIANTS = [
-    'Create a clean, futuristic visual for Identity Prism on Solana. '
-    'Cosmic gradients, neon accents, subtle blockchain motifs, dark background, no text.',
-    'A cosmic 3D solar system where planets represent crypto tokens and moons are NFTs. '
-    'Deep space background with neon purple and blue gradients, Solana-inspired. No text.',
-    'Abstract digital identity visualization: glowing fingerprint made of blockchain nodes '
-    'and transaction paths, cosmic dark background with teal and magenta accents. No text.',
-    'Futuristic holographic wallet card floating in space, showing a reputation score '
-    'and cosmic badges, dark background with stars and nebula colors. No text.',
-    'A cosmic black hole consuming small token icons, with rent SOL particles escaping '
-    'back outward. Dark space background, neon green and purple accents. No text.',
-    'Digital soul portrait: abstract face made of on-chain data streams, transaction '
-    'histories forming neural patterns, Solana purple-blue palette. No text.',
+    'Dark mode UI dashboard screenshot showing a glowing wallet reputation score card '
+    'with tier badges, stats bars, and a 3D planetary visual. Clean product UI aesthetic, '
+    'purple-to-teal gradient accents on near-black background. Photorealistic, no text.',
+    'Cinematic close-up of a translucent holographic identity card floating above a '
+    'dark surface, reflecting light like a credit card, with subtle circuit patterns '
+    'and a soft purple glow emanating from within. No text, editorial photography style.',
+    'Aerial view of a glowing city at night where each city block is a wallet transaction, '
+    'brighter blocks = more active wallets. Solana purple and teal neon lights, '
+    'ultra-detailed bird-eye render, no text.',
+    'Stylized infographic art: a large circular score meter (like a speedometer) '
+    'in the center, surrounded by six orbital rings each representing a different '
+    'on-chain metric. Dark background, electric blue and violet gradients. No text.',
+    'A lone astronaut in full suit standing before a massive glowing portal made of '
+    'flowing transaction data streams. Cinematic sci-fi concept art, Solana purple palette, '
+    'volumetric light, no text.',
+    'Digital painting of a black hole made of tiny crypto token logos spiraling inward, '
+    'with streams of golden SOL particles escaping outward. Dark space, high-detail, '
+    'painterly style, no text.',
+    'Retro pixel art scene: a space arcade cabinet with a leaderboard showing wallet '
+    'addresses and scores, glowing CRT screen, synthwave purple-pink color palette. '
+    'Nostalgic 16-bit aesthetic, no text.',
+    'Abstract generative art: hundreds of thin orbit lines forming a unique 3D sphere '
+    'shape, each line a different transaction path, glowing at intersection points. '
+    'Deep navy background, bioluminescent teal and coral accents. No text.',
+    'Macro photography style: a Solana coin melting into streams of liquid data, '
+    'forming a face silhouette. Dark studio background, dramatic side lighting, '
+    'hyper-realistic render, no text.',
+    'Dark minimalist poster design: a single glowing geometric prism casting rainbow '
+    'spectrum light on a dark floor, with faint blockchain node lines visible in the '
+    'light beam. Studio lighting, ultra-clean composition. No text.',
 ]
 
 COOKIES_PATH = os.getenv('COOKIES_PATH', str(BASE_DIR / 'cookies.json')).strip()
@@ -184,9 +220,9 @@ MAX_IMAGE_BYTES = int(os.getenv('MAX_IMAGE_BYTES', str(1_500_000)))
 MAX_IMAGE_DIM = int(os.getenv('MAX_IMAGE_DIM', '1024'))
 
 RATE_LIMIT_BACKOFF_RANGE = (60 * 60, 120 * 60)  # 1-2h backoff on twikit rate limits
-ENGAGEMENT_COOLDOWN_SECONDS = int(os.getenv('ENGAGEMENT_COOLDOWN_SECONDS', str(60 * 60)))
+ENGAGEMENT_COOLDOWN_SECONDS = int(os.getenv('ENGAGEMENT_COOLDOWN_SECONDS', str(2 * 60 * 60)))
 POST_HOUR_BLOCK_SECONDS = int(os.getenv('POST_HOUR_BLOCK_SECONDS', str(10 * 60)))
-MIN_POST_INTERVAL_SECONDS = int(os.getenv('MIN_POST_INTERVAL_SECONDS', str(150 * 60)))
+MIN_POST_INTERVAL_SECONDS = int(os.getenv('MIN_POST_INTERVAL_SECONDS', str(60 * 60)))
 
 POST_RETRY_ENABLED = os.getenv('POST_RETRY_ENABLED', 'true').lower() == 'true'
 POST_RETRY_INTERVAL_RANGE = (
@@ -203,10 +239,12 @@ POST_RETRY_DAILY_RANGE = (
 )
 
 SYSTEM_PROMPT = (
-    'You are a Solana degen developer promoting Identity Prism — a tool that reveals '
-    'your on-chain soul on Solana. You are supportive, witty, and insightful. '
-    'Never sound like a bot or a generic ad. Keep it conversational. '
-    'One emoji max per message.'
+    'You are a solo indie developer who built a Solana identity and reputation tool from scratch. '
+    'You are technical, opinionated, and genuinely passionate about on-chain data. '
+    'You speak like a real developer sharing insights — not like a marketer. '
+    'You never hype or shill. You share observations, hot takes, and builder insights. '
+    'One emoji max per message. Never use exclamation marks more than once. '
+    'Never start with "I" — vary your sentence openers.'
 )
 
 SHILL_INSTRUCTION = (
@@ -242,54 +280,60 @@ TREND_PROMPT = (
 )
 
 POST_PROMPT = (
-    'Write a tweet about Identity Prism and what it reveals about your on-chain identity on Solana. '
-    'Be creative and varied — talk about badges, wallet scores, on-chain reputation, cosmic vibes, etc. '
-    'Write as many sentences as you need to fully express the thought — there is NO character limit. '
-    'You MUST always finish every sentence — NEVER stop mid-sentence. '
-    'FORMATTING RULES (CRITICAL): '
-    '- Use line breaks (blank lines) between logical thoughts/paragraphs for readability. '
-    '- Use 2-4 relevant emojis spread throughout the tweet (e.g. 🪐 🔮 ⭐ 🚀 💎 🌌 🛡️ 🏆 🔥 ✨). '
-    '- Do NOT write a wall of text — break it up so it looks beautiful on Twitter. '
-    'MUST include 1-2 of these exact hashtags: {hashtags} and a $SOL ticker. '
-    'Do NOT include any website link or "check my profile" — that part is handled separately. '
+    'Write ONE short, punchy tweet (2-4 sentences MAX). '
+    'Pick ONE angle from this list and write about it as a developer who built something real:\n'
+    '- A real problem in Solana ecosystem (Sybil farming, dust tokens, anonymous wallets in DeFi, '
+    'airdrop abuse, reputation-less wallets) — and connect it to what we built to solve it\n'
+    '- A technical insight from building on Solana (MagicBlock rollups, Helius DAS API, '
+    'cNFT minting, Mobile Wallet Adapter on Seeker/Saga)\n'
+    '- An observation about the Colosseum hackathon, Solana ecosystem growth, or on-chain identity trends\n'
+    '- A counterintuitive take about crypto identity, reputation, or wallet behavior\n'
+    'Write it like a builder sharing a real observation — not an ad. '
+    'Be specific, not generic. If mentioning a problem, name it clearly. '
+    'NO hype words. ONE emoji max. '
+    'MUST include {hashtags} and $SOL ticker. '
+    'Do NOT include any website link. '
     '{shill}'
 )
 
 THREAD_PROMPT = (
     'Write a Twitter thread (exactly 3 tweets) about {topic}. '
-    'Format: tweet 1 on first line, tweet 2 on second line, tweet 3 on third line. '
-    'Each tweet MUST be a COMPLETE thought — never cut off mid-sentence. '
-    'Tweet 1: hook/bold statement that makes people want to read more. End with a thread emoji 🧵. '
-    'Tweet 2: the meat — explain/elaborate with specific details or insights. '
-    'Tweet 3: conclusion with a takeaway. Include {hashtags}. '
-    'Be conversational, opinionated, and genuine — NOT generic or salesy. '
+    'Output ONLY the 3 tweet texts, one per line, nothing else — no numbering, no labels. '
+    'Each tweet MUST be a COMPLETE, standalone thought (2-4 sentences). '
+    'Tweet 1: a bold, counterintuitive opening statement. End with 🧵 '
+    'Tweet 2: back it up with specifics — real numbers, mechanisms, or dev insights. '
+    'Tweet 3: practical takeaway or open question for the reader. Include {hashtags} and $SOL. '
+    'Tone: technical founder sharing real insights — opinionated but not salesy. '
     'Do NOT include any website link. {shill}'
 )
 
 THREAD_TOPICS = [
-    'why on-chain identity will matter more than ENS domains',
-    'what your Solana wallet says about your degen personality',
-    'the difference between on-chain reputation and credit scores',
-    'why most people have no idea what their wallet reveals about them',
-    'how Identity Prism turns raw on-chain data into a cosmic identity card',
-    'the future of AI agents that can verify your on-chain reputation',
-    'why wallet scoring is the next big thing in Solana DeFi',
-    'how we built a 3D solar system from on-chain data',
-    'what makes a Mythic-tier wallet on Solana',
-    'burning tokens to reclaim rent SOL — the Black Hole feature explained',
+    'why every Solana airdrop will eventually require on-chain reputation proof',
+    'what your Solana wallet history actually reveals about you as a trader',
+    'the difference between on-chain reputation and a credit score — and why it matters',
+    'why Sybil attacks are destroying Solana airdrop culture and how scoring fixes it',
+    'how MagicBlock ephemeral rollups let us build a provably fair on-chain game',
+    'the real problem with anonymous wallets in DeFi and what builders are doing about it',
+    'why wallet scoring is the unglamorous infrastructure Solana actually needs',
+    'what I learned building a live reputation API that scores 40+ on-chain signals',
+    'how the Colosseum hackathon pushed us to ship the Black Hole token burner feature',
+    'why dust tokens in your wallet are costing you real SOL in rent — and how to fix it',
+    'what makes a wallet trustworthy on-chain — and how we measure it',
+    'the future of Solana dApps that gate access by on-chain reputation instead of KYC',
+    'why building on Solana Mobile (Seeker/Saga) forced us to rethink our entire UX',
+    'how Tapestry social graph + reputation scoring creates a new identity primitive',
 ]
 
 TREND_POST_PROMPT = (
-    'You just saw this trending tweet in the Solana ecosystem:\n'
+    'You saw this trending Solana tweet:\n'
     'Author: @{user}\nTweet: "{tweet_text}"\n\n'
-    'Write your own original tweet (NOT a reply) inspired by or reacting to this trend/topic. '
-    'Add your unique perspective as an on-chain identity builder. '
-    'Write as many sentences as you need to fully express the thought — there is NO character limit. '
-    'FORMATTING RULES (CRITICAL): '
-    '- Use line breaks (blank lines) between logical thoughts/paragraphs for readability. '
-    '- Use 2-4 relevant emojis spread throughout the tweet (e.g. 🪐 🔮 ⭐ 🚀 💎 🌌 🛡️ 🏆 🔥 ✨). '
-    '- Do NOT write a wall of text — break it up so it looks beautiful on Twitter. '
-    'Include {hashtags}. '
+    'Write your OWN short tweet (2-4 sentences). '
+    'React to the topic by connecting it to something you actually built or observed — '
+    'on-chain reputation, wallet scoring, identity, token dust, Sybil resistance, or Solana dev experience. '
+    'If the tweet is about a problem, briefly note that you built something that addresses it. '
+    'If it is about ecosystem growth, add a specific technical angle. '
+    'Sound like a dev with relevant first-hand experience — not a bystander. '
+    'ONE emoji max. Include {hashtags}. '
     'Do NOT mention the original author. Do NOT include any link. {shill}'
 )
 
@@ -315,6 +359,42 @@ WALLET_CHECK_KEYWORDS = [
     'look at my wallet', 'roast my wallet', 'what does my wallet', 'my on-chain',
     'check my address', 'check this wallet', 'identity prism me',
 ]
+
+NEWS_POST_PROMPT = (
+    'You just read this crypto/Solana news headline:\n'
+    '"{headline}" (Source: {source})\n'
+    'Summary: {summary}\n\n'
+    'Write ONE short tweet (2-4 sentences) reacting to this news. '
+    'Connect it to on-chain identity, wallet reputation, Sybil resistance, '
+    'or your experience building on Solana — whichever angle fits best. '
+    'Be specific about what this news means for the ecosystem. '
+    'Sound like a dev who has a real take — not just resharing news. '
+    'ONE emoji max. Include {hashtags}. '
+    'Do NOT include any link. {shill}'
+)
+
+REFLECTION_PROMPT = (
+    'You are an AI agent managing a Twitter account for an indie Solana developer. '
+    'Analyze your recent activity and provide a brief strategy adjustment.\n\n'
+    'Recent posts (last 24h):\n{posts_summary}\n\n'
+    'Today\'s stats: {today_stats}\n\n'
+    'Provide EXACTLY two lines:\n'
+    'ANALYSIS: [1 sentence — what pattern do you see in the posts above]\n'
+    'STRATEGY: [1 sentence — what to adjust today, e.g. "more news reactions" '
+    'or "shorter hot takes" or "engage more with DeFi accounts"]'
+)
+
+WALLET_SCORE_REPLY_PROMPT = (
+    'You scored a Solana wallet and got these results:\n'
+    'Address: {short_addr}\n'
+    'Score: {score}/1400 | Tier: {tier} | Badges: {badges}\n'
+    'Stats: {stats_line}\n\n'
+    'Write a short, engaging reply (2-3 COMPLETE sentences) commenting on this wallet. '
+    'Be specific — mention something interesting about their score, tier, or activity. '
+    'If score is high, compliment genuinely. If low, be encouraging not mean. '
+    'ONE emoji max. End with a subtle nudge to check their full card at identityprism.xyz. '
+    'Do NOT include any raw link — just mention the site name naturally.'
+)
 
 PEAK_HOURS_UTC = list(range(14, 19))  # 14:00-18:00 UTC = prime crypto twitter
 ACTIVE_HOURS_UTC = list(range(11, 23))  # broader active window
